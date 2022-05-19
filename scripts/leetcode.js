@@ -21,11 +21,6 @@ const languages = {
   Oracle: '.sql',
 };
 
-/* Commit messages */
-const readmeMsg = 'Create README - LeetHub';
-const discussionMsg = 'Prepend discussion post - LeetHub';
-const createNotesMsg = 'Attach NOTES - LeetHub';
-
 // problem types
 const NORMAL_PROBLEM = 0;
 const EXPLORE_SECTION_PROBLEM = 1;
@@ -55,223 +50,10 @@ function findLanguage() {
   return null;
 }
 
-/* Main function for uploading code to GitHub repo, and callback cb is called if success */
-const upload = (
-  token,
-  hook,
-  code,
-  directory,
-  filename,
-  sha,
-  msg,
-  cb = undefined,
-) => {
-  // To validate user, load user object from GitHub.
-  if(difficulty && difficulty !== undefined) {
-    const URL = `https://api.github.com/repos/${hook}/contents/${difficulty}/${directory}/${filename}`; 
-  } else {
-    const URL = `https://api.github.com/repos/${hook}/contents/${directory}/${filename}`;
-  }
-
-  /* Define Payload */
-  let data = {
-    message: msg,
-    content: code,
-    sha,
-  };
-
-  data = JSON.stringify(data);
-
-  const xhr = new XMLHttpRequest();
-  xhr.addEventListener('readystatechange', function () {
-    if (xhr.readyState === 4) {
-      if (xhr.status === 200 || xhr.status === 201) {
-        const updatedSha = JSON.parse(xhr.responseText).content.sha; // get updated SHA.
-
-        chrome.storage.local.get('stats', (data2) => {
-          let { stats } = data2;
-          if (stats === null || stats === {} || stats === undefined) {
-            // create stats object
-            stats = {};
-            stats.solved = 0;
-            stats.easy = 0;
-            stats.medium = 0;
-            stats.hard = 0;
-            stats.sha = {};
-          }
-          const filePath = directory + filename;
-          // Only increment solved problems statistics once
-          // New submission commits twice (README and problem)
-          if (filename === 'README.md' && sha === null) {
-            stats.solved += 1;
-            stats.easy += difficulty === 'Easy' ? 1 : 0;
-            stats.medium += difficulty === 'Medium' ? 1 : 0;
-            stats.hard += difficulty === 'Hard' ? 1 : 0;
-          }
-          stats.sha[filePath] = updatedSha; // update sha key.
-          chrome.storage.local.set({ stats }, () => {
-            console.log(
-              `Successfully committed ${filename} to github`,
-            );
-
-            // if callback is defined, call it
-            if (cb !== undefined) {
-              cb();
-            }
-          });
-        });
-      }
-    }
-  });
-  xhr.open('PUT', URL, true);
-  xhr.setRequestHeader('Authorization', `token ${token}`);
-  xhr.setRequestHeader('Accept', 'application/vnd.github.v3+json');
-  xhr.send(data);
-};
-
-/* Main function for updating code on GitHub Repo */
-/* Currently only used for prepending discussion posts to README */
-/* callback cb is called on success if it is defined */
-const update = (
-  token,
-  hook,
-  addition,
-  directory,
-  msg,
-  prepend,
-  cb = undefined,
-) => {
-  const URL = `https://api.github.com/repos/${hook}/contents/${directory}/README.md`;
-
-  /* Read from existing file on GitHub */
-  const xhr = new XMLHttpRequest();
-  xhr.addEventListener('readystatechange', function () {
-    if (xhr.readyState === 4) {
-      if (xhr.status === 200 || xhr.status === 201) {
-        const response = JSON.parse(xhr.responseText);
-        const existingContent = decodeURIComponent(
-          escape(atob(response.content)),
-        );
-        let newContent = '';
-
-        /* Discussion posts prepended at top of README */
-        /* Future implementations may require appending to bottom of file */
-        if (prepend) {
-          newContent = btoa(
-            unescape(encodeURIComponent(addition + existingContent)),
-          );
-        }
-
-        /* Write file with new content to GitHub */
-        upload(
-          token,
-          hook,
-          newContent,
-          directory,
-          'README.md',
-          response.sha,
-          msg,
-          cb,
-        );
-      }
-    }
-  });
-  xhr.open('GET', URL, true);
-  xhr.setRequestHeader('Authorization', `token ${token}`);
-  xhr.setRequestHeader('Accept', 'application/vnd.github.v3+json');
-  xhr.send();
-};
-
-function uploadGit(
-  code,
-  problemName,
-  fileName,
-  msg,
-  action,
-  prepend = true,
-  cb = undefined,
-  _diff = undefined,
-) {
-  // Assign difficulty
-  if (_diff && _diff !== undefined) {
-    difficulty = _diff.trim();
-  }
-
-  /* Get necessary payload data */
-  chrome.storage.local.get('leethub_token', (t) => {
-    const token = t.leethub_token;
-    if (token) {
-      chrome.storage.local.get('mode_type', (m) => {
-        const mode = m.mode_type;
-        if (mode === 'commit') {
-          /* Get hook */
-          chrome.storage.local.get('leethub_hook', (h) => {
-            const hook = h.leethub_hook;
-            if (hook) {
-              /* Get SHA, if it exists */
-
-              /* to get unique key */
-              const filePath = problemName + fileName;
-              chrome.storage.local.get('stats', (s) => {
-                const { stats } = s;
-                let sha = null;
-
-                if (
-                  stats !== undefined &&
-                  stats.sha !== undefined &&
-                  stats.sha[filePath] !== undefined
-                ) {
-                  sha = stats.sha[filePath];
-                }
-
-                if (action === 'upload') {
-                  /* Upload to git. */
-                  upload(
-                    token,
-                    hook,
-                    code,
-                    problemName,
-                    fileName,
-                    sha,
-                    msg,
-                    cb,
-                  );
-                } else if (action === 'update') {
-                  /* Update on git */
-                  update(
-                    token,
-                    hook,
-                    code,
-                    problemName,
-                    msg,
-                    prepend,
-                    cb,
-                  );
-                }
-              });
-            }
-          });
-        }
-      });
-    }
-  });
-}
-
-/* Function for finding and parsing the full code. */
-/* - At first find the submission details url. */
-/* - Then send a request for the details page. */
-/* - Finally, parse the code from the html reponse. */
-/* - Also call the callback if available when upload is success */
-function findCode(
-  uploadGit,
-  problemName,
-  fileName,
-  msg,
-  action,
-  cb = undefined,
-) {
+// Getting the code and commit message info
+const getCodeAndMsg = async (msg) => {
   /* Get the submission details url from the submission page. */
-  var submissionURL;
+  let submissionURL;
   const e = document.getElementsByClassName('status-column__3SUg');
   if (checkElem(e)) {
     // for normal problem submisson
@@ -286,91 +68,73 @@ function findCode(
   }
 
   if (submissionURL != undefined) {
-    /* Request for the submission details page */
-    const xhttp = new XMLHttpRequest();
-    xhttp.onreadystatechange = function () {
-      if (this.readyState == 4 && this.status == 200) {
-        /* received submission details as html reponse. */
-        var doc = new DOMParser().parseFromString(
-          this.responseText,
-          'text/html',
-        );
-        /* the response has a js object called pageData. */
-        /* Pagedata has the details data with code about that submission */
-        var scripts = doc.getElementsByTagName('script');
-        for (var i = 0; i < scripts.length; i++) {
-          var text = scripts[i].innerText;
-          if (text.includes('pageData')) {
-            /* Considering the pageData as text and extract the substring
+    let res = await fetch(submissionURL, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'text/html',
+      },
+    });
+
+    let respText = await res.text();
+
+    var doc = new DOMParser().parseFromString(respText, 'text/html');
+    var scripts = doc.getElementsByTagName('script');
+    for (var i = 0; i < scripts.length; i++) {
+      var text = scripts[i].innerText;
+      if (text.includes('pageData')) {
+        /* Considering the pageData as text and extract the substring
             which has the full code */
-            var firstIndex = text.indexOf('submissionCode');
-            var lastIndex = text.indexOf('editCodeUrl');
-            var slicedText = text.slice(firstIndex, lastIndex);
-            /* slicedText has code as like as. (submissionCode: 'Details code'). */
-            /* So finding the index of first and last single inverted coma. */
-            var firstInverted = slicedText.indexOf("'");
-            var lastInverted = slicedText.lastIndexOf("'");
-            /* Extract only the code */
-            var codeUnicoded = slicedText.slice(
-              firstInverted + 1,
-              lastInverted,
+        var firstIndex = text.indexOf('submissionCode');
+        var lastIndex = text.indexOf('editCodeUrl');
+        var slicedText = text.slice(firstIndex, lastIndex);
+        /* slicedText has code as like as. (submissionCode: 'Details code'). */
+        /* So finding the index of first and last single inverted coma. */
+        var firstInverted = slicedText.indexOf("'");
+        var lastInverted = slicedText.lastIndexOf("'");
+        /* Extract only the code */
+        var codeUnicoded = slicedText.slice(
+          firstInverted + 1,
+          lastInverted,
+        );
+        /* The code has some unicode. Replacing all unicode with actual characters */
+        var code = codeUnicoded.replace(
+          /\\u[\dA-F]{4}/gi,
+          function (match) {
+            return String.fromCharCode(
+              parseInt(match.replace(/\\u/g, ''), 16),
             );
-            /* The code has some unicode. Replacing all unicode with actual characters */
-            var code = codeUnicoded.replace(
-              /\\u[\dA-F]{4}/gi,
-              function (match) {
-                return String.fromCharCode(
-                  parseInt(match.replace(/\\u/g, ''), 16),
-                );
-              },
-            );
+          },
+        );
 
-            /*
-            for a submisssion in explore section we do not get probStat beforehand
-            so, parse statistics from submisson page
-            */
-            if (!msg) {
-              slicedText = text.slice(
-                text.indexOf('runtime'),
-                text.indexOf('memory'),
-              );
-              const resultRuntime = slicedText.slice(
-                slicedText.indexOf("'") + 1,
-                slicedText.lastIndexOf("'"),
-              );
-              slicedText = text.slice(
-                text.indexOf('memory'),
-                text.indexOf('total_correct'),
-              );
-              const resultMemory = slicedText.slice(
-                slicedText.indexOf("'") + 1,
-                slicedText.lastIndexOf("'"),
-              );
-              msg = `Time: ${resultRuntime}, Memory: ${resultMemory} - LeetHub`;
-            }
+        /* for a submisssion in explore section we do not get probStat beforehand
+        so, parse statistics from submisson page */
+        if (!msg) {
+          slicedText = text.slice(
+            text.indexOf('runtime'),
+            text.indexOf('memory'),
+          );
+          const resultRuntime = slicedText.slice(
+            slicedText.indexOf("'") + 1,
+            slicedText.lastIndexOf("'"),
+          );
+          slicedText = text.slice(
+            text.indexOf('memory'),
+            text.indexOf('total_correct'),
+          );
+          const resultMemory = slicedText.slice(
+            slicedText.indexOf("'") + 1,
+            slicedText.lastIndexOf("'"),
+          );
+          msg = `Time: ${resultRuntime}, Memory: ${resultMemory}`;
+        }
 
-            if (code != null) {
-              setTimeout(function () {
-                uploadGit(
-                  btoa(unescape(encodeURIComponent(code))),
-                  problemName,
-                  fileName,
-                  msg,
-                  action,
-                  true,
-                  cb,
-                );
-              }, 2000);
-            }
-          }
+        if (code !== null) {
+          return { code, msg };
         }
       }
-    };
-
-    xhttp.open('GET', submissionURL, true);
-    xhttp.send();
+    }
   }
-}
+};
 
 /* Main parser function for the code */
 function parseCode() {
@@ -409,6 +173,7 @@ function convertToSlug(string) {
     .replace(/^-+/, '') // Trim - from start of text
     .replace(/-+$/, ''); // Trim - from end of text
 }
+
 function getProblemNameSlug() {
   const questionElem = document.getElementsByClassName(
     'content__u3I1 question-content__JfgR',
@@ -503,7 +268,7 @@ function parseStats() {
   const spacePercentile = probStats[3].textContent;
 
   // Format commit message
-  return `Time: ${time} (${timePercentile}), Space: ${space} (${spacePercentile}) - LeetHub`;
+  return `Time: ${time} (${timePercentile}), Space: ${space} (${spacePercentile})`;
 }
 
 document.addEventListener('click', (event) => {
@@ -548,7 +313,7 @@ document.addEventListener('click', (event) => {
 /* function to get the notes if there is any
  the note should be opened atleast once for this to work
  this is because the dom is populated after data is fetched by opening the note */
-function getNotesIfAny() {
+const getNotesIfAny = () => {
   // there are no notes on expore
   if (document.URL.startsWith('https://leetcode.com/explore/'))
     return '';
@@ -576,10 +341,201 @@ function getNotesIfAny() {
     }
   }
   return notes.trim();
-}
+};
 
-const loader = setInterval(() => {
-  let code = null;
+const getMainSHA = async (hook, token) => {
+  const mainRefURL = `https://api.github.com/repos/${hook}/git/refs/heads/main`;
+  let mainSHA = '';
+
+  const headers = new Headers();
+  headers.append('Authorization', `Bearer ${token}`);
+
+  try {
+    const mainRef = await fetch(mainRefURL, {
+      method: 'GET',
+      headers: headers,
+    });
+    mainSHA = (await mainRef.json()).object.sha;
+  } catch (error) {
+    console.error('Error fetching main ref', error);
+  }
+
+  return mainSHA;
+};
+
+// creates a blob and returns the sha of the created blob
+const createBlob = async (hook, token, content, encoding) => {
+  const createBlobURL = `https://api.github.com/repos/${hook}/git/blobs`;
+  let blobSHA = '';
+
+  const headers = new Headers();
+  headers.append('Authorization', `Bearer ${token}`);
+
+  const body = {
+    content: content,
+    encoding: encoding,
+  };
+
+  try {
+    const blob = await fetch(createBlobURL, {
+      method: 'POST',
+      headers: headers,
+      body: JSON.stringify(body),
+    });
+    blobSHA = (await blob.json()).sha;
+  } catch (error) {
+    console.error('Error creating blob', error);
+  }
+
+  return blobSHA;
+};
+
+const uploadGitV2 = async (
+  problemName,
+  fileName,
+  readme,
+  notes,
+  code,
+  msg,
+  callback = undefined,
+) => {
+  await chrome.storage.local.get(
+    ['leethub_token', 'mode_type', 'leethub_hook', 'stats'],
+    async (res) => {
+      const token = res.leethub_token;
+      const mode = res.mode_type;
+      const hook = res.leethub_hook;
+      const stats = res.stats;
+
+      if (token && mode && hook) {
+        let tree = [];
+        let mainSHA = await getMainSHA(hook, token);
+        let markdownSHA = await createBlob(
+          hook,
+          token,
+          readme,
+          'utf-8',
+        );
+        // btoa(unescape(encodeURIComponent(notes)))
+        if (notes.length > 1) {
+          let notesSHA = await createBlob(
+            hook,
+            token,
+            notes,
+            'utf-8',
+          );
+        }
+
+        let codeSHA = await createBlob(hook, token, code, 'utf-8');
+
+        tree.push(
+          {
+            path: `${difficulty}/${problemName}/${fileName}`,
+            mode: '100644',
+            type: 'blob',
+            sha: codeSHA,
+          },
+          {
+            path: `${difficulty}/${problemName}/README.md`,
+            mode: '100644',
+            type: 'blob',
+            sha: markdownSHA,
+          },
+        );
+
+        if (notes.length > 1) {
+          tree.push({
+            path: `${difficulty}/${problemName}/NOTES.md`,
+            mode: '100644',
+            type: 'blob',
+            sha: notesSHA,
+          });
+        }
+
+        // create tree
+        const createTreeURL = `https://api.github.com/repos/${hook}/git/trees`;
+        const headers = new Headers();
+        headers.append('Authorization', `Bearer ${token}`);
+
+        const body = {
+          base_tree: mainSHA,
+          tree: tree,
+        };
+
+        try {
+          const tree = await fetch(createTreeURL, {
+            method: 'POST',
+            headers: headers,
+            body: JSON.stringify(body),
+          });
+          const treeSHA = (await tree.json()).sha;
+
+          // create commit
+          const createCommitURL = `https://api.github.com/repos/${hook}/git/commits`;
+          const commitBody = {
+            message: msg,
+            tree: treeSHA,
+            parents: [mainSHA],
+          };
+
+          const commit = await fetch(createCommitURL, {
+            method: 'POST',
+            headers: headers,
+            body: JSON.stringify(commitBody),
+          });
+          const commitSHA = (await commit.json()).sha;
+
+          // update ref
+          const updateRefURL = `https://api.github.com/repos/${hook}/git/refs/heads/main`;
+          const updateRefBody = {
+            sha: commitSHA,
+          };
+
+          const updateRef = await fetch(updateRefURL, {
+            method: 'PATCH',
+            headers: headers,
+            body: JSON.stringify(updateRefBody),
+          });
+
+          if (updateRef.status === 200) {
+            if (
+              stats === null ||
+              stats === {} ||
+              stats === undefined
+            ) {
+              // create stats object
+              stats = {};
+              stats.solved = 0;
+              stats.easy = 0;
+              stats.medium = 0;
+              stats.hard = 0;
+              stats.sha = {};
+            }
+
+            stats.solved += 1;
+            stats.easy += difficulty === 'Easy' ? 1 : 0;
+            stats.medium += difficulty === 'Medium' ? 1 : 0;
+            stats.hard += difficulty === 'Hard' ? 1 : 0;
+
+            const filePath = problemName + fileName;
+            stats.sha[filePath] = codeSHA; // update sha key.
+            chrome.storage.local.set({ stats }, () => {
+              console.log(
+                `Successfully committed ${fileName} to github`,
+              );
+            });
+
+            if (callback !== undefined) callback();
+          }
+        } catch (error) {
+          console.error('Error creating commit', error);
+        }
+      }
+    },
+  );
+};
+
+const loader = setInterval(async () => {
   let probStatement = null;
   let probStats = null;
   let probType;
@@ -641,48 +597,19 @@ const loader = setInterval(() => {
         ) {
           sha = stats.sha[filePath];
         }
-
-        /* Only create README if not already created */
-        if (sha === null) {
-          /* @TODO: Change this setTimeout to Promise */
-          uploadGit(
-            btoa(unescape(encodeURIComponent(probStatement))),
-            problemName,
-            'README.md',
-            readmeMsg,
-            'upload',
-          );
-        }
       });
 
-      /* get the notes and upload it */
-      /* only upload notes if there is any */
       notes = getNotesIfAny();
-      if (notes.length > 0) {
-        setTimeout(function () {
-          if (notes != undefined && notes.length != 0) {
-            console.log('Create Notes');
-            // means we can upload the notes too
-            uploadGit(
-              btoa(unescape(encodeURIComponent(notes))),
-              problemName,
-              'NOTES.md',
-              createNotesMsg,
-              'upload',
-            );
-          }
-        }, 500);
-      }
+      let { code, msg } = await getCodeAndMsg(probStats);
 
-      /* Upload code to Git */
       setTimeout(function () {
-        findCode(
-          uploadGit,
+        uploadGitV2(
           problemName,
           problemName + language,
-          probStats,
-          'upload',
-          // callback is called when the code upload to git is a success
+          probStatement,
+          notes,
+          code,
+          msg,
           () => {
             if (uploadState['countdown'])
               clearTimeout(uploadState['countdown']);
@@ -690,8 +617,8 @@ const loader = setInterval(() => {
             uploadState.uploading = false;
             markUploaded();
           },
-        ); // Encode `code` to base64
-      }, 1000);
+        );
+      }, 4000);
     }
   }
 }, 1000);
