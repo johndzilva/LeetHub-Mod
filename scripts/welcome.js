@@ -6,6 +6,10 @@ const repositoryName = () => {
   return $('#name').val().trim();
 };
 
+const leetCodeUserName = () => {
+  return $('#lc-username').val();
+};
+
 /* Status codes for creating of repo */
 
 const statusCode = (res, status, name) => {
@@ -83,7 +87,8 @@ const createRepo = (token, name) => {
     private: true,
     auto_init: true,
     description:
-      'Collection of LeetCode questions to ace the coding interview! - Created using [LeetHub](https://github.com/QasimWani/LeetHub)',
+      `Collection of LeetCode questions to ace the coding interview! - Created using [LeetHub](https://github.com/QasimWani/LeetHub)
+      ![LeetCode Stats](https://leetcode.card.workers.dev/${leetCodeUserName()}?theme=auto&font=baloo&extension=activity)`,
   };
   data = JSON.stringify(data);
 
@@ -162,6 +167,11 @@ const linkRepo = (token, name) => {
           chrome.storage.local.set({ leethub_hook: null }, () => {
             console.log('Defaulted repo hook to NONE');
           });
+          
+          /* Set LeetCode username to NONE */
+          chrome.storage.local.set({ leetcode_username: null }, () => {
+            console.log('Defaulted leetcode username to NONE');
+          });
 
           /* Hide accordingly */
           document.getElementById('hook_mode').style.display =
@@ -199,6 +209,14 @@ const linkRepo = (token, name) => {
               });
             },
           );
+
+          chrome.storage.local.set(
+            { leetcode_username: leetCodeUserName() },
+            () => {
+              console.log('Successfully created LeetCode username');
+            },
+          );
+
           /* Hide accordingly */
           document.getElementById('hook_mode').style.display = 'none';
           document.getElementById('commit_mode').style.display =
@@ -252,6 +270,12 @@ $('#hook_button').on('click', () => {
       'No repository name added - Enter the name of your repository!',
     );
     $('#name').focus();
+    $('#error').show();
+  } else if (!leetCodeUserName()) {
+    $('#error').text(
+      'Please enter your LeetCode username. Eg. Tyson073',
+    );
+    $('#lc-username').focus();
     $('#error').show();
   } else {
     $('#error').hide();
